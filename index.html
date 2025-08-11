@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flip-Flop Mobius Thread Simulation + Benchmark</title>
+<style>
+  body {
+	font-family: system-ui, sans-serif;
+	margin: 1rem;
+	background: #111;
+	color: #eee;
+  }
+  h1 {
+	margin-bottom: 0.2rem;
+  }
+  #controls {
+	margin-bottom: 1rem;
+  }
+  label {
+	margin-right: 0.5rem;
+  }
+  input[type=number] {
+	width: 4rem;
+  }
+  button {
+	margin: 0 0.25rem;
+	padding: 0.3rem 0.6rem;
+	background: #222;
+	border: 1px solid #666;
+	color: #eee;
+	cursor: pointer;
+  }
+  button:disabled {
+	opacity: 0.3;
+	cursor: not-allowed;
+  }
+  #counterDisplay {
+	font-family: monospace;
+	font-size: 1.5rem;
+	margin-bottom: 0.8rem;
+  }
+  .bit {
+	display: inline-block;
+	width: 1.4rem;
+	height: 1.4rem;
+	line-height: 1.4rem;
+	text-align: center;
+	margin: 0 0.1rem;
+	border-radius: 3px;
+	background: #222;
+	box-shadow: inset 0 0 5px #000;
+	color: #555;
+	font-weight: bold;
+	transition: background 0.3s, color 0.3s;
+  }
+  .bit.on {
+	background: #0f0;
+	color: #030;
+	box-shadow: 0 0 8px #0f0;
+  }
+  #treePanel {
+	max-height: 400px;
+	overflow-y: auto;
+	background: #222;
+	padding: 0.5rem;
+	border-radius: 6px;
+	font-family: monospace;
+	font-size: 0.9rem;
+  }
+  .node {
+	margin-left: 1.2rem;
+	position: relative;
+  }
+  .node:before {
+	content: "";
+	position: absolute;
+	left: -0.8rem;
+	top: 0.9rem;
+	width: 0.7rem;
+	height: 2px;
+	background: #444;
+  }
+  .node.collapsible > summary {
+	cursor: pointer;
+	user-select: none;
+  }
+  #infoPanel {
+	margin-top: 1rem;
+	font-size: 0.9rem;
+	line-height: 1.4;
+  }
+  #timelineCanvas {
+	width: 100%;
+	height: 150px;
+	background: #000;
+	border-radius: 6px;
+	display: block;
+	margin-top: 1rem;
+  }
+  #footer {
+	margin-top: 2rem;
+	font-size: 0.8rem;
+	color: #555;
+  }
+  #benchmarkStats {
+	margin-top: 1rem;
+	background: #222;
+	padding: 0.5rem;
+	border-radius: 6px;
+	font-family: monospace;
+	font-size: 0.9rem;
+	line-height: 1.3;
+  }
+</style>
+</head>
+<body>
+
+<h1>Flip-Flop Mobius Thread Simulation + Benchmark</h1>
+
+<div id="controls">
+  <label for="inputMaxDepth">Max Bit Depth (1–10):</label>
+  <input type="number" id="inputMaxDepth" value="6" min="1" max="10" />
+
+  <label for="inputMaxThreads">Max Threads:</label>
+  <input type="number" id="inputMaxThreads" value="100" min="1" max="10000" />
+
+  <input type="checkbox" id="chkInfinite" />
+  <label for="chkInfinite">Infinite Threads</label>
+
+  <button id="btnStart">Start</button>
+  <button id="btnPause" disabled>Pause</button>
+  <button id="btnReset" disabled>Reset</button>
+</div>
+
+<div id="counterDisplay"></div>
+
+<div id="treePanel" tabindex="0" aria-label="Thread Spawn Tree"></div>
+
+<canvas id="timelineCanvas"></canvas>
+
+<div id="infoPanel">
+  <div>Threads Active: <span id="activeThreads">0</span></div>
+  <div>Total Threads Spawned: <span id="totalThreads">0</span></div>
+  <div>Max Depth Reached: <span id="maxDepthReached">0</span></div>
+  <div>Cycle Count: <span id="cycleCount">0</span></div>
+</div>
+
+<div id="benchmarkStats">
+  <strong>Benchmark Stats:</strong>
+  <div>Avg Thread Spawn Time: <span id="avgThreadTime">0</span> ms</div>
+  <div>JS Heap Used: <span id="jsHeapUsed">N/A</span></div>
+  <div>FPS: <span id="fps">0</span></div>
+</div>
+
+<div id="footer">Created by ChatGPT - Simulation + browser benchmarking</div>
+
+<script>
+(() => {
+  // Controls
+  const inputMaxDepth = document.getElementById('inputMaxDepth');
+  const inputMaxThreads = document.getElementById('inputMaxThreads');
+  const chkInfinite = document.getElementById('chkInfinite');
+  const btnStart = document.getElementById('btnStart');
+  const btnPause = document.getElementById('btnPause');
+  const btnReset = document.getElementById('btnReset');
+
+  // Display areas
+  const counterDisplay = document.getElementById('counterDisplay');
+  const treePanel = document.getElementById('treePanel');
+  const activeThreadsSpan = document.getElementById('activeThreads');
+  const totalThreadsSpan = document.getElementById('totalThreads');
+  const maxDepthSpan = document.getElementById('maxDepthReached');
+  const cycleCountSpan = document.getElementById('cycleCount');
+
+  const benchmarkAvgTimeSpan = document.getElementById('avgThreadTime');
+  const benchmarkHeapSpan = document.getElementById('jsHeapUsed');
+  const benchmarkFpsSpan = document.getElementById('fps');
+
+  const timelineCanvas = document.getElementById('timelineCanvas');
+  const ctx = timelineCanvas.getContext('2d');
+  let timelineWidth, timelineHeight;
+
+  // Simulation state
+  let running = false;
+  let paused = false;
+
+  let maxDepth = 6;
+  let maxThreads = 100;
+  let bitCount = 6;
+
+  let cycle = 0;
+  let threadIdCounter = 0;
+  let activeThreads = 0;
+  let totalThreadsSpawned = 0;
+  let maxDepthReached = 0;
+
+  // Benchmark stats
+  let threadSpawnTimes = [];
+  let lastFrameTime = performance.now();
+  let frameCount = 0;
+  let fps = 0;
+
+  // Tree data structure: key=thread id, value = {parentId, depth, counter, children: []}
+  const threadTree = new Map();
+
+  // Timeline data - array of toggled counters over time
+  const timelineData = [];
+
+  // Canvas resizing
+  function resizeCanvas() {
+	timelineWidth = timelineCanvas.clientWidth * devicePixelRatio;
+	timelineHeight = timelineCanvas.clientHeight * devicePixelRatio;
+	timelineCanvas.width = timelineWidth;
+	timelineCanvas.height = timelineHeight;
+	ctx.scale(devicePixelRatio, devicePixelRatio);
+	drawTimeline();
+  }
+
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // Clear tree panel
+  function clearTree() {
+	threadTree.clear();
+	treePanel.innerHTML = '';
+	timelineData.length = 0;
+	drawTimeline();
+	threadSpawnTimes.length = 0;
+	fps = 0;
+	frameCount = 0;
+  }
+
+  // Update counter display (bits)
+  function updateCounterDisplay(counter) {
+	counterDisplay.innerHTML = '';
+	for (let i = bitCount - 1; i >= 0; i--) {
+	  const bit = (counter >> i) & 1;
+	  const bitSpan = document.createElement('span');
+	  bitSpan.className = 'bit' + (bit ? ' on' : '');
+	  bitSpan.textContent = bit;
+	  counterDisplay.appendChild(bitSpan);
+	}
+  }
+
+  // Add node to tree data
+  function addNode(id, parentId, depth, counter) {
+	threadTree.set(id, {parentId, depth, counter, children: []});
+	if (parentId !== null && threadTree.has(parentId)) {
+	  threadTree.get(parentId).children.push(id);
+	}
+  }
+
+  // Render tree recursively
+  function renderNode(id) {
+	const node = threadTree.get(id);
+	if (!node) return null;
+
+	const details = document.createElement('details');
+	details.className = 'node collapsible';
+	if (node.children.length === 0) details.open = true;
+
+	const summary = document.createElement('summary');
+	summary.textContent = `Thread #${id} | Depth: ${node.depth} | Counter: ${node.counter.toString(2).padStart(bitCount, '0')}`;
+	details.appendChild(summary);
+
+	node.children.forEach(childId => {
+	  const childNode = renderNode(childId);
+	  if (childNode) details.appendChild(childNode);
+	});
+
+	return details;
+  }
+
+  // Redraw full tree
+  function redrawTree() {
+	treePanel.innerHTML = '';
+	if (threadTree.size === 0) return;
+
+	// Find root nodes (parentId === null)
+	for (const [id, node] of threadTree) {
+	  if (node.parentId === null) {
+		const rootNode = renderNode(id);
+		if (rootNode) treePanel.appendChild(rootNode);
+	  }
+	}
+  }
+
+  // Update info panel
+  function updateInfo() {
+	activeThreadsSpan.textContent = activeThreads;
+	totalThreadsSpan.textContent = totalThreadsSpawned;
+	maxDepthSpan.textContent = maxDepthReached;
+	cycleCountSpan.textContent = cycle;
+  }
+
+  // Draw timeline graph of counter values over time
+  function drawTimeline() {
+	ctx.clearRect(0, 0, timelineCanvas.width, timelineCanvas.height);
+
+	if (timelineData.length === 0) return;
+
+	const w = timelineCanvas.clientWidth;
+	const h = timelineCanvas.clientHeight;
+	const margin = 10;
+
+	ctx.save();
+	ctx.lineWidth = 2;
+	ctx.strokeStyle = '#0f0';
+	ctx.beginPath();
+
+	// Map timelineData length to width, counter range to height
+	const maxCount = (1 << bitCount) - 1;
+
+	for (let i = 0; i < timelineData.length; i++) {
+	  const x = margin + ((w - 2 * margin) * i) / (timelineData.length - 1);
+	  const y = h - margin - ((h - 2 * margin) * timelineData[i]) / maxCount;
+
+	  if (i === 0) ctx.moveTo(x, y);
+	  else ctx.lineTo(x, y);
+	}
+
+	ctx.stroke();
+	ctx.restore();
+  }
+
+  // Calculate and update FPS
+  function updateFPS() {
+	const now = performance.now();
+	frameCount++;
+	if (now - lastFrameTime >= 1000) {
+	  fps = Math.round((frameCount * 1000) / (now - lastFrameTime));
+	  frameCount = 0;
+	  lastFrameTime = now;
+	  benchmarkFpsSpan.textContent = fps;
+	}
+  }
+
+  // Update JS heap usage (if available)
+  function updateHeapUsage() {
+	if (performance.memory) {
+	  const usedMB = (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2);
+	  benchmarkHeapSpan.textContent = `${usedMB} MB`;
+	} else {
+	  benchmarkHeapSpan.textContent = 'N/A';
+	}
+  }
+
+  // Core recursive thread function simulation
+  function threadFunc({id, depth, counter, parentId}) {
+	if (!running || paused) return;
+
+	const startTime = performance.now();
+
+	activeThreads++;
+	totalThreadsSpawned++;
+	cycle++;
+
+	maxDepthReached = Math.max(maxDepthReached, depth);
+
+	addNode(id, parentId, depth, counter);
+	redrawTree();
+	updateCounterDisplay(counter);
+	updateInfo();
+
+	// Track timeline data
+	timelineData.push(counter);
+	if (timelineData.length > 200) timelineData.shift();
+	drawTimeline();
+
+	// Track spawn time
+	const elapsed = performance.now() - startTime;
+	threadSpawnTimes.push(elapsed);
+	const avgTime = threadSpawnTimes.reduce((a,b) => a+b,0) / threadSpawnTimes.length;
+	benchmarkAvgTimeSpan.textContent = avgTime.toFixed(3);
+
+	// Spawn next threads
+	if (chkInfinite.checked || totalThreadsSpawned < maxThreads) {
+	  // Toggle bit at current depth
+	  const toggledCounter = counter ^ (1 << depth);
+
+	  // Next depth with wrap-around
+	  const nextDepth = (depth + 1) % bitCount;
+
+	  // Create two next threads to simulate branching
+	  const nextId1 = ++threadIdCounter;
+	  const nextId2 = ++threadIdCounter;
+
+	  // Spawn next threads asynchronously (simulate concurrency)
+	  setTimeout(() => threadFunc({
+		id: nextId1,
+		depth: nextDepth,
+		counter: toggledCounter,
+		parentId: id
+	  }), 0);
+
+	  setTimeout(() => threadFunc({
+		id: nextId2,
+		depth: nextDepth,
+		counter: counter,
+		parentId: id
+	  }), 0);
+	}
+
+	activeThreads--;
+  }
+
+  // Control button handlers
+  btnStart.onclick = () => {
+	if (running) return;
+	// Setup parameters
+	maxDepth = Math.min(Math.max(parseInt(inputMaxDepth.value), 1), 10);
+	bitCount = maxDepth;
+	maxThreads = Math.max(parseInt(inputMaxThreads.value), 1);
+
+	running = true;
+	paused = false;
+
+	clearTree();
+
+	threadIdCounter = 1;
+	activeThreads = 0;
+	totalThreadsSpawned = 0;
+	maxDepthReached = 0;
+	cycle = 0;
+
+	// Start first thread (root)
+	threadFunc({id: threadIdCounter, depth: 0, counter: 0, parentId: null});
+
+	btnStart.disabled = true;
+	btnPause.disabled = false;
+	btnReset.disabled = false;
+  };
+
+  btnPause.onclick = () => {
+	if (!running) return;
+	paused = !paused;
+	btnPause.textContent = paused ? 'Resume' : 'Pause';
+  };
+
+  btnReset.onclick = () => {
+	running = false;
+	paused = false;
+	clearTree();
+
+	btnStart.disabled = false;
+	btnPause.disabled = true;
+	btnPause.textContent = 'Pause';
+	btnReset.disabled = true;
+
+	// Export benchmark result JSON to console on reset
+	const benchmarkReport = {
+	  totalThreadsSpawned,
+	  maxDepthReached,
+	  avgThreadSpawnTimeMS: threadSpawnTimes.length > 0
+		? (threadSpawnTimes.reduce((a,b) => a+b,0) / threadSpawnTimes.length).toFixed(3)
+		: 0,
+	  finalCycleCount: cycle,
+	  fps,
+	  jsHeapUsedMB: (performance.memory ? (performance.memory.usedJSHeapSize / 1024 / 1024).toFixed(2) : 'N/A'),
+	  timestamp: new Date().toISOString()
+	};
+	console.log('Benchmark Report:', benchmarkReport);
+	alert('Benchmark completed. See console for report.');
+  };
+
+  // Animation loop to update FPS and heap usage regularly
+  function animationLoop() {
+	if (running && !paused) {
+	  updateFPS();
+	  updateHeapUsage();
+	}
+	requestAnimationFrame(animationLoop);
+  }
+
+  animationLoop();
+})();
+</script>
+
+</body>
+</html>
